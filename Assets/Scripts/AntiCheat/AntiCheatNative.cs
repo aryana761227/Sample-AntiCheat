@@ -1,432 +1,304 @@
 ﻿using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
-public static class AntiCheatNative
+namespace AntiCheat
 {
-    #region Native Function Declarations
-    
-    // Callback delegates for native library
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void DetectionCallbackDelegate(string processName, string executableName);
-    
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void LogCallbackDelegate(string processName, string executableName, int pid);
-    
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void PermissionCallbackDelegate(string message);
-
-    // Native function imports
-    [DllImport("anticheat")]
-    private static extern bool InitializeAntiCheat(DetectionCallbackDelegate onDetection, 
-                                                   LogCallbackDelegate onLog, 
-                                                   PermissionCallbackDelegate onPermission);
-    
-    [DllImport("anticheat")]
-    private static extern void SetTickRate(int milliseconds);
-    
-    [DllImport("anticheat")]
-    private static extern void AddSuspiciousProcess(string processName);
-    
-    [DllImport("anticheat")]
-    private static extern void ClearSuspiciousProcesses();
-    
-    [DllImport("anticheat")]
-    private static extern void StartMonitoring();
-    
-    [DllImport("anticheat")]
-    private static extern void StopMonitoring();
-    
-    [DllImport("anticheat")]
-    private static extern void EnableLogging(bool enable);
-    
-    [DllImport("anticheat")]
-    private static extern void Shutdown();
-    
-    [DllImport("anticheat")]
-    private static extern bool detectCheater();
-    
-    [DllImport("anticheat")]
-    private static extern int GetRunningProcessCount();
-    
-    [DllImport("anticheat")]
-    private static extern bool IsMonitoringActive();
-    
-    #endregion
-
-    #region Public Events
-    
-    /// <summary>
-    /// Fired when a suspicious process is detected
-    /// </summary>
-    public static event Action<string, string> OnCheatDetected;
-    
-    /// <summary>
-    /// Fired when logging is enabled and processes are being monitored
-    /// </summary>
-    public static event Action<string, string, int> OnProcessLogged;
-    
-    /// <summary>
-    /// Fired when permission issues occur
-    /// </summary>
-    public static event Action<string> OnPermissionRequired;
-    
-    #endregion
-
-    #region Private Fields
-    
-    private static readonly object lockObject = new object();
-    private static Queue<System.Action> mainThreadActions = new Queue<System.Action>();
-    
-    // Keep references to prevent garbage collection
-    private static DetectionCallbackDelegate detectionCallback;
-    private static LogCallbackDelegate logCallback;
-    private static PermissionCallbackDelegate permissionCallback;
-    
-    private static bool isInitialized = false;
-    private static bool debugMode = true;
-    private static MonoBehaviour coroutineRunner;
-    
-    #endregion
-
-    #region Initialization
-    
-    /// <summary>
-    /// Initialize the anti-cheat system
-    /// </summary>
-    public static bool Initialize(bool enableDebugLogs = true)
+    public static class AntiCheatNative
     {
-        if (isInitialized)
+        // Library name (without lib prefix on Android/Linux)
+        private const string LibraryName = "anticheat";
+        
+        // Callback delegates
+        public delegate void OnDetectionDelegate([MarshalAs(UnmanagedType.LPStr)] string message);
+        public delegate void OnLogDelegate([MarshalAs(UnmanagedType.LPStr)] string message);
+        public delegate void OnPermissionDelegate([MarshalAs(UnmanagedType.LPStr)] string permission);
+        
+        // Native function imports
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern bool InitializeAntiCheat(
+            IntPtr onDetection,
+            IntPtr onLog,
+            IntPtr onPermission
+        );
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern bool StartMonitoring();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void StopMonitoring();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void Shutdown();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern bool IsMonitoring();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void SetTickRate(int milliseconds);
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void AddSuspiciousProcess([MarshalAs(UnmanagedType.LPStr)] string processName);
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ClearSuspiciousProcesses();
+        
+        // Static callback instances to prevent garbage collection
+        private static OnDetectionDelegate s_onDetectionCallback;
+        private static OnLogDelegate s_onLogCallback;
+        private static OnPermissionDelegate s_onPermissionCallback;
+        
+        // Events
+        public static event Action<string> OnDetection;
+        public static event Action<string> OnLog;
+        public static event Action<string> OnPermissionRequested;
+        
+        /// <summary>
+        /// Initialize the anti-cheat system
+        /// </summary>
+        /// <param name="enableLogging">Enable detailed logging</param>
+        /// <returns>True if initialization was successful</returns>
+        public static bool Initialize(bool enableLogging = true)
         {
-            LogDebug("Anti-cheat already initialized");
-            return true;
-        }
-        
-        debugMode = enableDebugLogs;
-        
-        // Create a hidden GameObject to handle coroutines and main thread dispatching
-        SetupCoroutineRunner();
-        
-        try
-        {
-            // Create callback delegates (keep references to prevent GC)
-            detectionCallback = OnNativeCheatDetected;
-            logCallback = OnNativeProcessLogged;
-            permissionCallback = OnNativePermissionRequired;
-            
-            // Initialize native library
-            bool success = InitializeAntiCheat(detectionCallback, logCallback, permissionCallback);
-            
-            if (success)
+            try
             {
-                isInitialized = true;
-                LogDebug("Anti-cheat initialized successfully");
-                return true;
+                // Create callback delegates
+                s_onDetectionCallback = OnDetectionCallback;
+                s_onLogCallback = OnLogCallback;
+                s_onPermissionCallback = OnPermissionCallback;
+                
+                // Get function pointers
+                IntPtr detectionPtr = Marshal.GetFunctionPointerForDelegate(s_onDetectionCallback);
+                IntPtr logPtr = Marshal.GetFunctionPointerForDelegate(s_onLogCallback);
+                IntPtr permissionPtr = Marshal.GetFunctionPointerForDelegate(s_onPermissionCallback);
+                
+                // Initialize native library
+                bool result = InitializeAntiCheat(detectionPtr, logPtr, permissionPtr);
+                
+                if (result)
+                {
+                    Debug.Log("[AntiCheat] Native library initialized successfully");
+                }
+                else
+                {
+                    Debug.LogError("[AntiCheat] Failed to initialize native library");
+                }
+                
+                return result;
             }
-            else
+            catch (Exception ex)
             {
-                LogError("Failed to initialize anti-cheat native library");
+                Debug.LogError($"[AntiCheat] Exception during anti-cheat initialization: {ex.Message}");
                 return false;
             }
         }
-        catch (Exception e)
-        {
-            LogError($"Exception during anti-cheat initialization: {e.Message}");
-            return false;
-        }
-    }
-    
-    private static void SetupCoroutineRunner()
-    {
-        if (coroutineRunner != null) return;
         
-        GameObject runnerObject = new GameObject("AntiCheatRunner");
-        runnerObject.hideFlags = HideFlags.HideAndDontSave;
-        UnityEngine.Object.DontDestroyOnLoad(runnerObject);
-        
-        coroutineRunner = runnerObject.AddComponent<AntiCheatRunner>();
-    }
-    
-    #endregion
-
-    #region Public API
-    
-    /// <summary>
-    /// Quick setup and start monitoring
-    /// </summary>
-    public static void QuickStart(int tickRateMs = 1000, bool enableLogging = false)
-    {
-        if (!Initialize())
+        /// <summary>
+        /// Start monitoring for cheats
+        /// </summary>
+        /// <returns>True if monitoring started successfully</returns>
+        public static bool Start()
         {
-            LogError("Failed to initialize anti-cheat");
-            return;
-        }
-        
-        SetTickRate(tickRateMs);
-        StartAntiCheatMonitoring();
-        
-        if (enableLogging)
-        {
-            SetLogging(true);
-        }
-    }
-    
-    /// <summary>
-    /// Start monitoring for suspicious processes
-    /// </summary>
-    public static void StartAntiCheatMonitoring()
-    {
-        if (!isInitialized)
-        {
-            LogError("Anti-cheat not initialized. Call Initialize() first.");
-            return;
-        }
-        
-        try
-        {
-            StartMonitoring();
-            LogDebug("Anti-cheat monitoring started");
-        }
-        catch (Exception e)
-        {
-            LogError($"Error starting monitoring: {e.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Set the monitoring tick rate in milliseconds
-    /// </summary>
-    public static void SetMonitoringTickRate(int milliseconds)
-    {
-        int tickRateMs = Mathf.Clamp(milliseconds, 100, 60000);
-        
-        if (isInitialized)
-        {
-            SetTickRate(tickRateMs);
-            LogDebug($"Tick rate set to {tickRateMs}ms");
-        }
-    }
-    
-    /// <summary>
-    /// Add a process name to the suspicious list
-    /// </summary>
-    public static void AddSuspiciousProcessName(string processName)
-    {
-        if (string.IsNullOrEmpty(processName))
-        {
-            LogError("Process name cannot be null or empty");
-            return;
-        }
-        
-        if (isInitialized)
-        {
-            AddSuspiciousProcess(processName);
-            LogDebug($"Added suspicious process: {processName}");
-        }
-        else
-        {
-            LogError("Anti-cheat not initialized. Call Initialize() first.");
-        }
-    }
-    
-    /// <summary>
-    /// Clear all suspicious processes
-    /// </summary>
-    public static void ClearAllSuspiciousProcesses()
-    {
-        if (isInitialized)
-        {
-            ClearSuspiciousProcesses();
-            LogDebug("Cleared all suspicious processes");
-        }
-    }
-    
-    /// <summary>
-    /// Enable or disable detailed logging
-    /// </summary>
-    public static void SetLogging(bool enabled)
-    {
-        if (isInitialized)
-        {
-            EnableLogging(enabled);
-            LogDebug($"Logging {(enabled ? "enabled" : "disabled")}");
-        }
-    }
-    
-    /// <summary>
-    /// Check for cheats once (synchronous)
-    /// </summary>
-    public static bool CheckForCheats()
-    {
-        if (!isInitialized)
-        {
-            LogError("Anti-cheat not initialized");
-            return false;
-        }
-        
-        try
-        {
-            return detectCheater();
-        }
-        catch (Exception e)
-        {
-            LogError($"Error checking for cheats: {e.Message}");
-            return false;
-        }
-    }
-    
-    /// <summary>
-    /// Get current number of running processes
-    /// </summary>
-    public static int GetProcessCount()
-    {
-        if (!isInitialized) return 0;
-        
-        try
-        {
-            return GetRunningProcessCount();
-        }
-        catch (Exception e)
-        {
-            LogError($"Error getting process count: {e.Message}");
-            return 0;
-        }
-    }
-    
-    /// <summary>
-    /// Check if monitoring is currently active
-    /// </summary>
-    public static bool IsMonitoring()
-    {
-        if (!isInitialized) return false;
-        
-        try
-        {
-            return IsMonitoringActive();
-        }
-        catch (Exception e)
-        {
-            LogError($"Error checking monitoring status: {e.Message}");
-            return false;
-        }
-    }
-    
-    /// <summary>
-    /// Check if the anti-cheat system is initialized
-    /// </summary>
-    public static bool IsInitialized => isInitialized;
-    
-    /// <summary>
-    /// Shutdown the anti-cheat system
-    /// </summary>
-    public static void ShutdownAntiCheat()
-    {
-        if (!isInitialized) return;
-        
-        try
-        {
-            Shutdown();
-            isInitialized = false;
-            
-            // Clean up coroutine runner
-            if (coroutineRunner != null)
+            try
             {
-                UnityEngine.Object.Destroy(coroutineRunner.gameObject);
-                coroutineRunner = null;
+                bool result = StartMonitoring();
+                if (result)
+                {
+                    Debug.Log("[AntiCheat] Monitoring started");
+                }
+                else
+                {
+                    Debug.LogError("[AntiCheat] Failed to start monitoring");
+                }
+                return result;
             }
-            
-            LogDebug("Anti-cheat shutdown complete");
-        }
-        catch (Exception e)
-        {
-            LogError($"Error during shutdown: {e.Message}");
-        }
-    }
-    
-    #endregion
-
-    #region Native Callbacks
-    
-    private static void OnNativeCheatDetected(string processName, string executableName)
-    {
-        // Execute on main thread
-        EnqueueMainThreadAction(() =>
-        {
-            LogDebug($"CHEAT DETECTED: Process={processName}, Executable={executableName}");
-            OnCheatDetected?.Invoke(processName, executableName);
-        });
-    }
-    
-    private static void OnNativeProcessLogged(string processName, string executableName, int pid)
-    {
-        // Execute on main thread
-        EnqueueMainThreadAction(() =>
-        {
-            OnProcessLogged?.Invoke(processName, executableName, pid);
-        });
-    }
-    
-    private static void OnNativePermissionRequired(string message)
-    {
-        // Execute on main thread
-        EnqueueMainThreadAction(() =>
-        {
-            LogError($"Permission required: {message}");
-            OnPermissionRequired?.Invoke(message);
-        });
-    }
-    
-    #endregion
-
-    #region Main Thread Dispatching
-    
-    private static void EnqueueMainThreadAction(System.Action action)
-    {
-        lock (lockObject)
-        {
-            mainThreadActions.Enqueue(action);
-        }
-    }
-    
-    internal static void ProcessMainThreadActions()
-    {
-        lock (lockObject)
-        {
-            while (mainThreadActions.Count > 0)
+            catch (Exception ex)
             {
-                var action = mainThreadActions.Dequeue();
-                try
+                Debug.LogError($"[AntiCheat] Exception starting monitoring: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Stop monitoring
+        /// </summary>
+        public static void Stop()
+        {
+            try
+            {
+                StopMonitoring();
+                Debug.Log("[AntiCheat] Monitoring stopped");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception stopping monitoring: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Shutdown the anti-cheat system
+        /// </summary>
+        public static void ShutdownAntiCheat()
+        {
+            try
+            {
+                Shutdown();
+                Debug.Log("[AntiCheat] Anti-cheat shutdown complete");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception during shutdown: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Check if monitoring is active
+        /// </summary>
+        /// <returns>True if monitoring is active</returns>
+        public static bool GetIsMonitoring()
+        {
+            try
+            {
+                return IsMonitoring();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception checking monitoring status: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Set the monitoring tick rate
+        /// </summary>
+        /// <param name="milliseconds">Milliseconds between monitoring checks</param>
+        public static void SetMonitoringTickRate(int milliseconds)
+        {
+            try
+            {
+                SetTickRate(milliseconds);
+                Debug.Log($"[AntiCheat] Tick rate set to {milliseconds}ms");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception setting tick rate: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Add a process name to the suspicious processes list
+        /// </summary>
+        /// <param name="processName">Name of the suspicious process</param>
+        public static void AddSuspiciousProcessName(string processName)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(processName))
                 {
-                    action?.Invoke();
+                    Debug.LogError("[AntiCheat] Process name cannot be null or empty");
+                    return;
                 }
-                catch (Exception e)
+                
+                AddSuspiciousProcess(processName);
+                Debug.Log($"[AntiCheat] Added suspicious process: {processName}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception adding suspicious process: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Clear all suspicious processes
+        /// </summary>
+        public static void ClearAllSuspiciousProcesses()
+        {
+            try
+            {
+                ClearSuspiciousProcesses();
+                Debug.Log("[AntiCheat] Cleared suspicious processes list");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception clearing suspicious processes: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Quick start with default settings
+        /// </summary>
+        /// <param name="tickRateMs">Monitoring tick rate in milliseconds</param>
+        /// <param name="enableLogging">Enable logging</param>
+        /// <returns>True if successfully started</returns>
+        public static bool QuickStart(int tickRateMs = 1000, bool enableLogging = true)
+        {
+            try
+            {
+                if (!Initialize(enableLogging))
                 {
-                    LogError($"Error executing main thread action: {e.Message}");
+                    Debug.LogError("[AntiCheat] Failed to initialize anti-cheat");
+                    return false;
                 }
+                
+                SetMonitoringTickRate(tickRateMs);
+                
+                if (!Start())
+                {
+                    Debug.LogError("[AntiCheat] Failed to start monitoring");
+                    return false;
+                }
+                
+                Debug.Log("[AntiCheat] Quick start successful");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception during quick start: {ex.Message}");
+                return false;
+            }
+        }
+        
+        // Callback implementations
+        [AOT.MonoPInvokeCallback(typeof(OnDetectionDelegate))]
+        private static void OnDetectionCallback(string message)
+        {
+            try
+            {
+                Debug.LogWarning($"[AntiCheat] DETECTION: {message}");
+                OnDetection?.Invoke(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception in detection callback: {ex.Message}");
+            }
+        }
+        
+        [AOT.MonoPInvokeCallback(typeof(OnLogDelegate))]
+        private static void OnLogCallback(string message)
+        {
+            try
+            {
+                Debug.Log($"[AntiCheat] {message}");
+                OnLog?.Invoke(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception in log callback: {ex.Message}");
+            }
+        }
+        
+        [AOT.MonoPInvokeCallback(typeof(OnPermissionDelegate))]
+        private static void OnPermissionCallback(string permission)
+        {
+            try
+            {
+                Debug.Log($"[AntiCheat] Permission requested: {permission}");
+                OnPermissionRequested?.Invoke(permission);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception in permission callback: {ex.Message}");
             }
         }
     }
-    
-    #endregion
-
-    #region Logging
-    
-    private static void LogDebug(string message)
-    {
-        if (debugMode)
-        {
-            Debug.Log($"[AntiCheat] {message}");
-        }
-    }
-    
-    private static void LogError(string message)
-    {
-        Debug.LogError($"[AntiCheat] {message}");
-    }
-    
-    #endregion
 }
-
-// Helper MonoBehaviour for main thread dispatching
