@@ -1,0 +1,3 @@
+D:/Projects/NativeAntiCheat/build-armeabi-v7a/CMakeFiles/anticheat.dir
+D:/Projects/NativeAntiCheat/build-armeabi-v7a/CMakeFiles/edit_cache.dir
+D:/Projects/NativeAntiCheat/build-armeabi-v7a/CMakeFiles/rebuild_cache.dir

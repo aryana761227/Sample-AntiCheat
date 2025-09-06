@@ -1,21 +1,29 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Scripting;
 
 namespace AntiCheat
 {
+    [Preserve]
     public static class AntiCheatNative
     {
         // Library name (without lib prefix on Android/Linux)
         private const string LibraryName = "anticheat";
         
-        // Callback delegates
+        // Callback delegates with preservation attributes
+        [Preserve]
         public delegate void OnDetectionDelegate([MarshalAs(UnmanagedType.LPStr)] string message);
+        
+        [Preserve]
         public delegate void OnLogDelegate([MarshalAs(UnmanagedType.LPStr)] string message);
+        
+        [Preserve]
         public delegate void OnPermissionDelegate([MarshalAs(UnmanagedType.LPStr)] string permission);
         
-        // Native function imports
+        // Native function imports with preservation attributes
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern bool InitializeAntiCheat(
             IntPtr onDetection,
             IntPtr onLog,
@@ -23,34 +31,64 @@ namespace AntiCheat
         );
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern bool StartMonitoring();
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern void StopMonitoring();
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern void Shutdown();
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern bool IsMonitoring();
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern void SetTickRate(int milliseconds);
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern void AddSuspiciousProcess([MarshalAs(UnmanagedType.LPStr)] string processName);
         
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
         private static extern void ClearSuspiciousProcesses();
         
+        // New functions for detailed logging and process enumeration
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
+        private static extern void SetDetailedLogging(bool enabled);
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
+        private static extern int GetProcessCount();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
+        private static extern void LogAllProcesses();
+        
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+        [Preserve]
+        private static extern void FindProcessByName([MarshalAs(UnmanagedType.LPStr)] string processName);
+        
         // Static callback instances to prevent garbage collection
+        [Preserve]
         private static OnDetectionDelegate s_onDetectionCallback;
+        [Preserve]
         private static OnLogDelegate s_onLogCallback;
+        [Preserve]
         private static OnPermissionDelegate s_onPermissionCallback;
         
         // Events
+        [Preserve]
         public static event Action<string> OnDetection;
+        [Preserve]
         public static event Action<string> OnLog;
+        [Preserve]
         public static event Action<string> OnPermissionRequested;
         
         /// <summary>
@@ -221,6 +259,81 @@ namespace AntiCheat
             catch (Exception ex)
             {
                 Debug.LogError($"[AntiCheat] Exception clearing suspicious processes: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Enable or disable detailed process logging
+        /// </summary>
+        /// <param name="enabled">True to enable detailed logging</param>
+        public static void EnableDetailedLogging(bool enabled)
+        {
+            try
+            {
+                SetDetailedLogging(enabled);
+                Debug.Log($"[AntiCheat] Detailed logging {(enabled ? "enabled" : "disabled")}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception setting detailed logging: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Get the current number of running processes
+        /// </summary>
+        /// <returns>Number of processes or -1 on error</returns>
+        public static int GetCurrentProcessCount()
+        {
+            try
+            {
+                int count = GetProcessCount();
+                Debug.Log($"[AntiCheat] Current process count: {count}");
+                return count;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception getting process count: {ex.Message}");
+                return -1;
+            }
+        }
+        
+        /// <summary>
+        /// Manually log all currently running processes
+        /// </summary>
+        public static void LogAllCurrentProcesses()
+        {
+            try
+            {
+                LogAllProcesses();
+                Debug.Log("[AntiCheat] Manual process enumeration completed - check native logs");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception logging all processes: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Search for processes containing a specific name
+        /// </summary>
+        /// <param name="processName">Name to search for (case-insensitive)</param>
+        public static void SearchForProcess(string processName)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(processName))
+                {
+                    Debug.LogError("[AntiCheat] Process name cannot be null or empty");
+                    return;
+                }
+                
+                FindProcessByName(processName);
+                Debug.Log($"[AntiCheat] Search for '{processName}' completed - check native logs");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[AntiCheat] Exception searching for process: {ex.Message}");
             }
         }
         
