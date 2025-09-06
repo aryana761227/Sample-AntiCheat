@@ -25,6 +25,7 @@
     </application>
     <uses-permission android:name="android.permission.GET_TASKS" />
     <uses-permission android:name="android.permission.GET_RUNNING_TASKS" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
-    tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DUMP"/>
+    <uses-permission android:name="android.permission.READ_LOGS"/>
 </manifest>
