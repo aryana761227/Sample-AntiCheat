@@ -1,0 +1,23 @@
+<linker>
+  <!-- Preserve the entire AntiCheat assembly -->
+  <assembly fullname="Assembly-CSharp" preserve="all">
+    <!-- Preserve specific AntiCheat classes -->
+    <type fullname="AntiCheat.AntiCheatNative" preserve="all"/>
+    <type fullname="AntiCheat.AntiCheatUnity" preserve="all"/>
+  </assembly>
+  
+  <!-- Preserve native library functions -->
+  <assembly fullname="anticheat" preserve="all"/>
+  
+  <!-- Preserve specific P/Invoke methods -->
+  <assembly fullname="mscorlib">
+    <type fullname="System.Runtime.InteropServices.DllImportAttribute" preserve="all"/>
+  </assembly>
+  
+  <!-- Preserve callback delegate types -->
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="AntiCheat.AntiCheatNative+OnDetectionDelegate" preserve="all"/>
+    <type fullname="AntiCheat.AntiCheatNative+OnLogDelegate" preserve="all"/>
+    <type fullname="AntiCheat.AntiCheatNative+OnPermissionDelegate" preserve="all"/>
+  </assembly>
+</linker>
