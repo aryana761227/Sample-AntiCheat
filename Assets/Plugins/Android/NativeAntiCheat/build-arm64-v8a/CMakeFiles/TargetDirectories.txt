@@ -1,3 +1,0 @@
-D:/Projects/NativeAntiCheat/build-arm64-v8a/CMakeFiles/anticheat.dir
-D:/Projects/NativeAntiCheat/build-arm64-v8a/CMakeFiles/edit_cache.dir
-D:/Projects/NativeAntiCheat/build-arm64-v8a/CMakeFiles/rebuild_cache.dir
